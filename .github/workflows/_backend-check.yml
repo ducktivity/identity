@@ -1,9 +1,6 @@
 name: Backend Check
 
-# Reusable verification gate: format, vet, build, test, staticcheck. Same checks
-# scripts/check.sh runs locally (minus gosec, which identity does not yet declare
-# as a go tool). Single source of truth for "the backend is verified at this
-# commit"; called by both Backend CI (PRs) and Backend CD (push to main).
+# Reusable verification gate: format, vet, build, test, staticcheck. Same checks scripts/check.sh runs locally (minus gosec, which identity does not yet declare as a go tool). Single source of truth for "the backend is verified at this commit"; called by both Backend CI (PRs) and Backend CD (push to main).
 
 on:
   workflow_call:

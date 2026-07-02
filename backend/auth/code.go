@@ -1,5 +1,4 @@
-// Package auth implements passwordless email login: generating and verifying the
-// one-time codes, normalizing emails, and delivering the codes by email.
+// Package auth implements passwordless email login: generating and verifying the one-time codes, normalizing emails, and delivering the codes by email.
 package auth
 
 import (
@@ -13,7 +12,7 @@ import (
 	"time"
 )
 
-// Login-code policy (ported from Drinkwater's handlers/auth.go).
+// Login-code policy.
 const (
 	CodeLength     = 6
 	CodeTTL        = 10 * time.Minute
@@ -21,9 +20,7 @@ const (
 	MaxAttempts    = 5
 )
 
-// pepper peppers login-code hashes so a database leak cannot reveal in-flight
-// codes and they cannot be brute-forced offline without the secret. Set once at
-// startup via Init from AUTH_CODE_PEPPER.
+// pepper peppers login-code hashes so a database leak cannot reveal in-flight codes and they cannot be brute-forced offline without the secret. Set once at startup via Init from AUTH_CODE_PEPPER.
 var pepper []byte
 
 // Init sets the login-code pepper. Call once at startup.
@@ -53,14 +50,12 @@ func HashCode(code string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// Matches reports whether a candidate hashes to the stored hash, in constant time
-// so verification latency does not leak how many characters were correct.
+// Matches reports whether a candidate hashes to the stored hash, in constant time so verification latency does not leak how many characters were correct.
 func Matches(candidate, storedHash string) bool {
 	return subtle.ConstantTimeCompare([]byte(HashCode(candidate)), []byte(storedHash)) == 1
 }
 
-// NormalizeEmail validates and lowercases an email so the UNIQUE constraint treats
-// "Me@x.com" and "me@x.com" as one account. Returns ok=false when invalid.
+// NormalizeEmail validates and lowercases an email so the UNIQUE constraint treats "Me@x.com" and "me@x.com" as one account. Returns ok=false when invalid.
 func NormalizeEmail(raw string) (string, bool) {
 	addr, err := mail.ParseAddress(strings.TrimSpace(raw))
 	if err != nil {

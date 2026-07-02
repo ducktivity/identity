@@ -1,6 +1,4 @@
-// Package api holds the request and response DTOs at the HTTP boundary. Naming
-// each wire shape (rather than using inline anonymous structs in the handlers)
-// gives every endpoint a reusable type and one place to read the contract.
+// Package api holds the request and response DTOs at the HTTP boundary. Naming each wire shape (rather than using inline anonymous structs in the handlers) gives every endpoint a reusable type and one place to read the contract.
 package api
 
 import "github.com/google/uuid"
@@ -29,8 +27,7 @@ type User struct {
 	Email string    `json:"email"`
 }
 
-// VerifyResponse is returned by POST /v1/auth/verify: the session token plus the
-// account it belongs to.
+// VerifyResponse is returned by POST /v1/auth/verify: the session token plus the account it belongs to.
 type VerifyResponse struct {
 	Token string `json:"token"`
 	User  User   `json:"user"`
@@ -42,8 +39,7 @@ type GrantResponse struct {
 	Plan   string    `json:"plan"`
 }
 
-// MessageResponse is a generic single-message body (e.g. the deliberately vague
-// acknowledgement returned by POST /v1/auth/request).
+// MessageResponse is a generic single-message body (e.g. the deliberately vague acknowledgement returned by POST /v1/auth/request).
 type MessageResponse struct {
 	Message string `json:"message"`
 }

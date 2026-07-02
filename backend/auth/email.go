@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Email delivery (ported from Drinkwater's email package).
+// Email delivery via Resend.
 
 const resendEndpoint = "https://api.resend.com/emails"
 
@@ -22,8 +22,7 @@ var sender struct {
 	client *http.Client
 }
 
-// InitEmail configures the Resend email sender. An empty apiKey selects dev mode:
-// login codes are logged instead of emailed. Call once at startup.
+// InitEmail configures the Resend email sender. An empty apiKey selects dev mode: login codes are logged instead of emailed. Call once at startup.
 func InitEmail(apiKey, from string) {
 	sender.apiKey = apiKey
 	sender.from = from
@@ -38,8 +37,7 @@ type resendRequest struct {
 	Text    string   `json:"text"`
 }
 
-// SendLoginCode emails a one-time login code. In dev mode (no API key) it logs the
-// code and returns nil so the flow completes without an email provider.
+// SendLoginCode emails a one-time login code. In dev mode (no API key) it logs the code and returns nil so the flow completes without an email provider.
 func SendLoginCode(ctx context.Context, to, code string) error {
 	if sender.apiKey == "" {
 		slog.Info("login code (dev mode, email not sent)", "to", to, "code", code)

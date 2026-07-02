@@ -1,5 +1,4 @@
-# Local env (real secrets never live in git — prod secrets are GitHub Environment
-# secrets, dev values stay on your machine).
+# Local env (real secrets never live in git — prod secrets are GitHub Environment secrets, dev values stay on your machine).
 backend/.env
 .env
 .env.prod

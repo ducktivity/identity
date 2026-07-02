@@ -13,9 +13,7 @@ fi
 # 2. Extract the DATABASE_URL from the .env file if it exists
 DB_URL="postgres://postgres:postgres@localhost:5432/ducktivity?sslmode=disable&options=-c%20search_path%3Didentity" # Default fallback
 if [ -f .env ]; then
-  # This clever line reads the .env file and extracts the DATABASE_URL specifically
-  # Strip only up to the FIRST '=' so values that themselves contain '='
-  # (e.g. a Neon URL ending in '?sslmode=require') survive intact.
+  # Read the .env file and extract DATABASE_URL specifically. Strip only up to the FIRST '=' so values that themselves contain '=' (e.g. a Neon URL ending in '?sslmode=require') survive intact.
   ENV_URL=$(grep -v '^#' .env | grep -e "DATABASE_URL" | sed -e 's/^[^=]*=//')
   if [ ! -z "$ENV_URL" ]; then
     DB_URL=$ENV_URL

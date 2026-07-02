@@ -12,22 +12,14 @@ import (
 	"github.com/ducktivity/platform-go/authtoken"
 )
 
-// BillingWebhook receives Stripe subscription events and resolves them to the
-// single suite-wide entitlement. STUB: signature verification and event parsing
-// are TODOs — see docs/suite-architecture §5. The shape is real so the "one payment
-// unlocks all apps" path is exercised end-to-end via DevGrant.
+// BillingWebhook receives Stripe subscription events and resolves them to the single suite-wide entitlement. STUB: signature verification and event parsing are TODOs — see docs/suite-architecture §5. The shape is real so the "one payment unlocks all apps" path is exercised end-to-end via DevGrant.
 func BillingWebhook(w http.ResponseWriter, _ *http.Request) {
-	// TODO(billing): verify the Stripe-Signature header against stripeWebhookSecret,
-	// parse the event (checkout.session.completed, customer.subscription.updated/
-	// deleted), map the Stripe customer to a user, and call store.UpsertEntitlement
-	// with plan=pro/free, status=<stripe status>, until=current_period_end.
+	// TODO(billing): verify the Stripe-Signature header against stripeWebhookSecret, parse the event (checkout.session.completed, customer.subscription.updated/deleted), map the Stripe customer to a user, and call store.UpsertEntitlement with plan=pro/free, status=<stripe status>, until=current_period_end.
 	_ = stripeWebhookSecret
 	w.WriteHeader(http.StatusOK)
 }
 
-// DevGrant flips a user's suite-wide entitlement without Stripe, so the end-to-end
-// "pro unlocks every app" flow can be tested before billing is wired. Registered
-// only in development.
+// DevGrant flips a user's suite-wide entitlement without Stripe, so the end-to-end "pro unlocks every app" flow can be tested before billing is wired. Registered only in development.
 func DevGrant(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var in api.DevGrantInput

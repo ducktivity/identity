@@ -20,14 +20,10 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, api.ErrorResponse{Error: msg})
 }
 
-// serverError records a 5xx server fault: it reports the underlying error to Sentry
-// (which captures the stack trace and groups the issue), links the resulting event
-// id onto the single request-summary line httplog emits, and returns a generic JSON
-// 500. The internal error is never leaked to the client.
+// serverError records a 5xx server fault: it reports the underlying error to Sentry (which captures the stack trace and groups the issue), links the resulting event id onto the single request-summary line httplog emits, and returns a generic JSON 500. The internal error is never leaked to the client.
 func serverError(w http.ResponseWriter, r *http.Request, err error, clientMsg string) {
 	fields := map[string]any{"error": err.Error()}
-	// CaptureException is a no-op when Sentry is unconfigured (empty DSN in dev):
-	// the hub has no client and returns a nil event id.
+	// CaptureException is a no-op when Sentry is unconfigured (empty DSN in dev): the hub has no client and returns a nil event id.
 	if hub := sentry.GetHubFromContext(r.Context()); hub != nil {
 		if id := hub.CaptureException(err); id != nil {
 			fields["sentry_id"] = string(*id)
