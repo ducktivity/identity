@@ -15,6 +15,7 @@ import (
 // Healthz is the liveness probe: 200 whenever the process is running. It checks no dependencies so it stays cheap and never fails for a transient database blip.
 func Healthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok"))
 }
 
 // Readyz is the readiness probe: 200 only when the database is reachable, 503 otherwise. The deploy reconcile gates cutover on this probe.
@@ -28,6 +29,7 @@ func Readyz(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ready"))
 }
 
 // JWKS serves the identity service's public key set. App backends fetch this to verify tokens. No auth — public keys only.
