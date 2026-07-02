@@ -1,0 +1,127 @@
+name: Backend CD
+
+# On push to main (when backend/ changed): re-verify the commit, run the
+# expand-only goose migration from the runner straight at Neon, then — only if it
+# succeeds — build and push the image to GHCR. That is where CI stops.
+#
+# CI holds NO SSH access to the box and never flips the live service. Going live is
+# a deliberate manual step: the operator runs deploy/reconcile-backend.sh on the
+# box to pull the new sha-tag, `compose up`, gate on /readyz, and auto-rollback.
+# Expand-only migrations mean the still-running old container keeps working against
+# the new schema until that manual cutover.
+
+on:
+  push:
+    branches: [main]
+
+# Least privilege by default; the image job widens to packages: write.
+permissions:
+  contents: read
+
+jobs:
+  # Detect whether anything affecting the backend image changed in this push.
+  # We diff against the prior commit rather than using a top-level on.push.paths
+  # filter, so this workflow always starts (future frontend/desktop pipelines can
+  # hang off its completion) and we just skip the expensive jobs when the backend
+  # is untouched — the run stays green.
+  changes:
+    name: Detect backend changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend: 'backend/**'
+
+  # Belt-and-suspenders: re-verify the exact commit before we migrate/publish it.
+  # Same reusable gate the PR runs. Skipped (run stays green) when backend is
+  # unchanged.
+  check:
+    name: Verify backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    uses: ./.github/workflows/_backend-check.yml
+
+  # Migrations run here, against Neon, BEFORE the image is published. Expand-only,
+  # so schema and old container stay compatible until the manual box reconcile.
+  # Uses the production environment for DATABASE_URL_MIGRATOR; restrict that
+  # environment to main in repo settings.
+  migrate:
+    name: Apply migrations (goose -> Neon)
+    needs: [changes, check]
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: Apply migrations (goose -> Neon)
+        working-directory: backend
+        env:
+          DBSTRING: ${{ secrets.DATABASE_URL_MIGRATOR }}
+        run: go tool goose -dir sql/schema postgres "$DBSTRING" up
+
+  # Publish only after the gate passed AND the migration applied. When the backend
+  # is unchanged, `latest` already points at the correct image — nothing to build.
+  image:
+    name: Build & push image to GHCR
+    needs: [changes, check, migrate]
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write # required to push to GHCR
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute build timestamp
+        id: bm
+        run: echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }} # auto-provided; no PAT needed
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # Image name = ghcr.io/<repo owner>/identity-backend (auto-lowercased).
+          images: ghcr.io/${{ github.repository_owner }}/identity-backend
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-
+          # immutable per-commit tag, e.g. sha-1a2b3c4
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Feed git metadata into the Dockerfile ARGs -> ldflags, so the running
+          # binary (and its logs / Sentry release) report the exact commit.
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.bm.outputs.build_time }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

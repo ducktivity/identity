@@ -1,0 +1,15 @@
+name: Backend CI
+
+# Validation gate on every PR to main. No image, no deploy — PRs only verify.
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Verify backend
+    uses: ./.github/workflows/_backend-check.yml

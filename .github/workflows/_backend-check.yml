@@ -1,0 +1,50 @@
+name: Backend Check
+
+# Reusable verification gate: format, vet, build, test, staticcheck. Same checks
+# scripts/check.sh runs locally (minus gosec, which identity does not yet declare
+# as a go tool). Single source of truth for "the backend is verified at this
+# commit"; called by both Backend CI (PRs) and Backend CD (push to main).
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Format, vet, build, test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+
+      - name: gofmt (check only, never mutate)
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test ./...
+
+      - name: staticcheck
+        uses: dominikh/staticcheck-action@v1
+        with:
+          version: latest
+          install-go: false
+          working-directory: backend

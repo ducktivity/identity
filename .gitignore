@@ -1,0 +1,17 @@
+# Local env (real secrets never live in git — prod secrets are GitHub Environment
+# secrets, dev values stay on your machine).
+backend/.env
+.env
+.env.prod
+out.env
+
+# Go build output
+backend/identity
+backend/docs/
+
+# OS / editor
+.DS_Store
+tmp/
+
+# Coding agents
+claude.md

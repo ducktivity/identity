@@ -1,0 +1,59 @@
+# Identity service runtime stack: just the Go app. Ingress (the shared cloudflared)
+# and log shipping (the shared vector) both live in the edge stack; this app attaches
+# to the external `ducktivity_edge` network and carries the collect_logs label so the
+# edge vector tails it. The box pulls the image from GHCR; values come from the .env
+# CI renders on each deploy.
+services:
+  app:
+    # CI publishes this image. IMAGE_TAG is exported by deploy/reconcile-backend.sh to pin a
+    # specific sha-<gitsha> (and to roll back); it defaults to latest for local use.
+    image: ghcr.io/ducktivity/identity-backend:${IMAGE_TAG:-latest}
+    build:
+      context: ./backend
+    environment:
+      ENV: ${ENV:-development}
+      # Every suite backend listens on 8000 inside its container; apps are told apart
+      # by their network alias (identity-service), not by port.
+      PORT: "8000"
+      # Structured logging: verbosity + format. JSON in prod for the edge vector /
+      # BetterStack pipeline; text locally. Both have code defaults, so optional.
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+      # Sentry error tracking. Empty disables it (no-op), so local dev needs no DSN.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      # Base URL + "iss" claim. Every app verifies tokens against this issuer.
+      ISSUER: ${ISSUER}
+      # Crown jewel: base64 Ed25519 seed backing token signing + the JWKS. Stable
+      # forever — rotating it invalidates every token across the whole suite.
+      AUTH_SIGNING_KEY: ${AUTH_SIGNING_KEY}
+      # Peppers login-code hashes.
+      AUTH_CODE_PEPPER: ${AUTH_CODE_PEPPER}
+      # Resend email for login codes; From header for those emails.
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      AUTH_EMAIL_FROM: ${AUTH_EMAIL_FROM}
+      # Verifies Stripe billing webhook signatures.
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      # App-role connection string (least privilege; migrations use a separate role).
+      DATABASE_URL: ${DATABASE_URL}
+    # No host port is published: ingress is network-only. The shared cloudflared routes
+    # id.ducktvt.com -> identity-service:8000 over ducktivity_edge, and the deploy's
+    # /readyz check reaches that same address (see deploy/reconcile-backend.sh). The alias must
+    # be unique across the suite since every app's service is named "app" internally.
+    networks:
+      ducktivity_edge:
+        aliases:
+          - identity-service
+    labels:
+      collect_logs: "true"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+networks:
+  # Created once by the shared edge stack (not by this app). `docker network create
+  # ducktivity_edge` if it does not exist yet.
+  ducktivity_edge:
+    external: true
