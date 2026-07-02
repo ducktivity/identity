@@ -13,7 +13,7 @@ services:
     environment:
       ENV: ${ENV:-development}
       # Every suite backend listens on 8000 inside its container; apps are told apart
-      # by their network alias (identity-service), not by port.
+      # by their network alias (identity-backend), not by port.
       PORT: "8000"
       # Structured logging: verbosity + format. JSON in prod for the edge vector /
       # BetterStack pipeline; text locally. Both have code defaults, so optional.
@@ -36,13 +36,13 @@ services:
       # App-role connection string (least privilege; migrations use a separate role).
       DATABASE_URL: ${DATABASE_URL}
     # No host port is published: ingress is network-only. The shared cloudflared routes
-    # id.ducktvt.com -> identity-service:8000 over ducktivity_edge, and the deploy's
+    # id.ducktvt.com -> identity-backend:8000 over ducktivity_edge, and the deploy's
     # /readyz check reaches that same address (see deploy/reconcile-backend.sh). The alias must
     # be unique across the suite since every app's service is named "app" internally.
     networks:
       ducktivity_edge:
         aliases:
-          - identity-service
+          - identity-backend
     labels:
       collect_logs: "true"
     logging:

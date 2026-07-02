@@ -23,7 +23,7 @@ deploy() {
 ready() {
   for _ in $(seq 1 10); do
     if docker run --rm --network ducktivity_edge curlimages/curl:latest \
-        -fsS http://identity-service:8000/readyz >/dev/null 2>&1; then return 0; fi
+        -fsS http://identity-backend:8000/readyz >/dev/null 2>&1; then return 0; fi
     sleep 3
   done
   return 1

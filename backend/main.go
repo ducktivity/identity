@@ -92,7 +92,7 @@ func main() {
 	// request, and slog.SetDefault routes startup/shutdown/DB logs through the same
 	// pipeline. Health probes are quieted so they don't drown the logs (or the
 	// BetterStack bill).
-	logger := httplog.NewLogger("identity", httplog.Options{
+	logger := httplog.NewLogger("identity-backend", httplog.Options{
 		JSON:             cfg.logJSON,
 		LogLevel:         cfg.logLevel,
 		Concise:          true,
