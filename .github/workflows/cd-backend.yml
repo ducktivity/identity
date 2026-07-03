@@ -24,6 +24,8 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # 'every' = a file must match ALL patterns to count. Without it paths-filter ORs the list, so the '!backend/scripts/**' exclusion is ignored (any backend/** file, and even non-backend files, satisfy the negation) and the filter fires on every push.
+          predicate-quantifier: 'every'
           filters: |
             backend:
               - 'backend/**'
