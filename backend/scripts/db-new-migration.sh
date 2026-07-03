@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.." # Always run from the backend root
 MIGRATION_NAME=$1
 if [ -z "$MIGRATION_NAME" ]; then
   echo "❌ Error: You must provide a migration name (e.g., add_some_column)"
-  echo "Usage: ./scripts/db-new-schema.sh add_some_column"
+  echo "Usage: ./scripts/db-new-migration.sh add_some_column"
   exit 1
 fi
 

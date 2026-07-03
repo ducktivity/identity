@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.." # Always run from the backend root
 COMMAND=$1
 if [ -z "$COMMAND" ]; then
   echo "❌ Error: You must provide a migration command (e.g., up, down, status)"
-  echo "Usage: ./scripts/migrate.sh up"
+  echo "Usage: ./scripts/db-migrate.sh up"
   exit 1
 fi
 

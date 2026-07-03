@@ -25,7 +25,9 @@ jobs:
         id: filter
         with:
           filters: |
-            backend: 'backend/**'
+            backend:
+              - 'backend/**'
+              - '!backend/scripts/**'
 
   # Belt-and-suspenders: re-verify the exact commit before we migrate/publish it. Same reusable gate the PR runs. Skipped (run stays green) when backend is unchanged.
   check:
