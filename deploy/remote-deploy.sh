@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs on YOUR machine (Git Bash / WSL), NOT the box. One command to go live: copies the compose file, the reconcile script, and your local .env.prod (landed on the box as .env, which compose auto-loads) to the box over Cloudflare Access SSH, then runs reconcile-backend.sh (pull -> up -> /readyz -> auto-rollback). No secrets live in git or GitHub; your secrets stay in identity/.env.prod on your disk only.
+# Runs on YOUR machine (Git Bash / WSL), NOT the box. One command to go live: copies the compose file and your local .env.prod (landed on the box as .env, which compose auto-loads) to the box over Cloudflare Access SSH, then reconciles the stack on the box (pull -> up -> /readyz -> auto-rollback) — the box-side steps are streamed inline over SSH, so there is no second script to maintain. No secrets live in git or GitHub; your secrets stay in identity/.env.prod on your disk only.
 #
 # Migrations are NOT run here; CI applies them (expand-only) when it builds the image, so the tag you deploy already has its schema live.
 #
@@ -24,10 +24,9 @@ SSH_OPTS=(-o "ProxyCommand=cloudflared access ssh --hostname %h" -o StrictHostKe
 DEST="$SSH_USER@$SSH_HOST"
 
 echo "==> staging runtime files on $DEST:$APP_DIR"
-ssh "${SSH_OPTS[@]}" "$DEST" "mkdir -p '$APP_DIR/deploy'"
-scp "${SSH_OPTS[@]}" docker-compose.yml          "$DEST:$APP_DIR/docker-compose.yml"
-scp "${SSH_OPTS[@]}" deploy/reconcile-backend.sh "$DEST:$APP_DIR/deploy/reconcile-backend.sh"
-scp "${SSH_OPTS[@]}" "$SECRETS"                  "$DEST:$APP_DIR/.env"
+ssh "${SSH_OPTS[@]}" "$DEST" "mkdir -p '$APP_DIR'"
+scp "${SSH_OPTS[@]}" docker-compose.yml "$DEST:$APP_DIR/docker-compose.yml"
+scp "${SSH_OPTS[@]}" "$SECRETS"         "$DEST:$APP_DIR/.env"
 
 # Optional: authenticate the box to GHCR if the image package is private. Skip this by leaving GHCR_TOKEN unset and making the GHCR package public instead.
 if [ -n "${GHCR_TOKEN:-}" ]; then
@@ -36,5 +35,38 @@ if [ -n "${GHCR_TOKEN:-}" ]; then
 fi
 
 echo "==> reconciling to $TAG"
-ssh "${SSH_OPTS[@]}" "$DEST" \
-  "chmod 600 '$APP_DIR/.env' && chmod +x '$APP_DIR/deploy/reconcile-backend.sh' && '$APP_DIR/deploy/reconcile-backend.sh' '$TAG'"
+# The reconcile runs ON THE BOX: pull the new image, swap the stack, wait for /readyz, and roll back to the last good tag if the new one never reports ready — so the deploy self-heals. The body is streamed over SSH (bash -s) with APP_DIR and the tag passed as positional args; the quoted heredoc keeps it literal so nothing expands locally. IMAGE_TAG in the shell env overrides docker-compose's default, so we never edit files to pin a tag. The app image is distroless (no curl), so /readyz is probed from a throwaway curl container on the shared edge network — every suite backend listens on 8000.
+ssh "${SSH_OPTS[@]}" "$DEST" "bash -s -- '$APP_DIR' '$TAG'" <<'REMOTE'
+set -euo pipefail
+cd "$1"
+NEW_TAG="$2"
+chmod 600 .env
+PREV_TAG="$(cat .last_good_tag 2>/dev/null || echo latest)"
+
+deploy() {
+  IMAGE_TAG="$1" docker compose pull
+  IMAGE_TAG="$1" docker compose up -d --remove-orphans
+}
+
+ready() {
+  for _ in $(seq 1 10); do
+    if docker run --rm --network ducktivity_edge curlimages/curl:latest \
+        -fsS http://identity-backend:8000/readyz >/dev/null 2>&1; then return 0; fi
+    sleep 3
+  done
+  return 1
+}
+
+echo "deploying $NEW_TAG (previous good: $PREV_TAG)"
+deploy "$NEW_TAG"
+docker image prune -f
+
+if ready; then
+  echo "$NEW_TAG" > .last_good_tag
+  echo "deploy ok: $NEW_TAG is live"
+else
+  echo "readyz failed; rolling back to $PREV_TAG" >&2
+  deploy "$PREV_TAG"
+  exit 1
+fi
+REMOTE

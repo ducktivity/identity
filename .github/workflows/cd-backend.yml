@@ -2,7 +2,7 @@ name: Backend CD
 
 # On push to main (when backend/ changed): re-verify the commit, run the expand-only goose migration from the runner straight at Neon, then — only if it succeeds — build and push the image to GHCR. That is where CI stops.
 #
-# CI holds NO SSH access to the box and never flips the live service. Going live is a deliberate manual step: the operator runs deploy/reconcile-backend.sh on the box to pull the new sha-tag, `compose up`, gate on /readyz, and auto-rollback. Expand-only migrations mean the still-running old container keeps working against the new schema until that manual cutover.
+# CI holds NO SSH access to the box and never flips the live service. Going live is a deliberate manual step: the operator runs deploy/remote-deploy.sh from their machine, which copies the compose file + .env to the box and reconciles the stack over SSH (pull the new sha-tag, `compose up`, gate on /readyz, and auto-rollback). Expand-only migrations mean the still-running old container keeps working against the new schema until that manual cutover.
 
 on:
   push:
