@@ -95,6 +95,23 @@ over Cloudflare Access SSH, then on the box pulls the tag, runs `compose up`, ga
 ready. No secrets ever touch git or GitHub — they live only in `identity/.env.prod` on
 your disk.
 
+**Publishing the API client (manual, for now).** The `@ducktivity/identity-client` npm
+package is **not** shipped by CI — [API Client CD](.github/workflows/cd-api-client.yml)
+is intentionally disabled (commented out) so we publish by hand while the contract is
+still churning. When you've changed the API and want to cut a client release:
+
+```bash
+cd api-client
+pnpm run generate-types        # regenerate src/schema.d.ts from shared-schemas/swagger.json
+
+# bump "version" in package.json, then:
+pnpm run build                 # tsc build into dist/
+npm publish --access public    # needs "npm login" for the @ducktivity org
+```
+
+Re-enable the workflow (uncomment it) once we want push-to-`main` to own the publish
+again; it needs an `NPM_TOKEN` repository secret.
+
 Prereqs:
 
 - [ ] `cloudflared` installed.
