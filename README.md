@@ -109,9 +109,6 @@ pnpm run build                 # tsc build into dist/
 npm publish --access public    # needs "npm login" for the @ducktivity org
 ```
 
-Re-enable the workflow (uncomment it) once we want push-to-`main` to own the publish
-again; it needs an `NPM_TOKEN` repository secret.
-
 Prereqs:
 
 - [ ] `cloudflared` installed.

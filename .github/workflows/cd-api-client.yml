@@ -1,71 +1,69 @@
-# DISABLED — we publish @ducktivity/identity-client to npm manually for now (see identity/README.md → "Deploying it"). Everything below is commented out so GitHub skips this workflow entirely; uncomment it to restore push-triggered auto-publish once we want CI to own the release again. It requires an NPM_TOKEN repository secret (an npm automation token for the @ducktivity org).
+name: Publish API Client Package
 
-# name: API Client CD
+# On push to main: build the @ducktivity/identity-client package and publish it to the public npm registry, but only when the version in package.json is not yet on the registry. Same "push auto-builds" standard as the backend image; there is no go-live step because a package publish is not a live cutover.
 #
-# # On push to main (when api-client/ or the schema it is generated from changed): build the @ducktivity/identity-client package and publish it to the public npm registry — but only when the version in package.json is new. Same "push auto-builds" standard as the backend image; there is no go-live step because a package publish is not a live cutover.
-# #
-# # The contract's source of truth is backend/api/dto.go -> swaggo -> shared-schemas/swagger.json; the committed src/schema.d.ts is generated from it (see api-client/README.md). Regenerate with `pnpm run generate-types` and bump the version before pushing.
-# #
-# # Requires an NPM_TOKEN repository secret: an npm automation token for the @ducktivity org.
+# The contract's source of truth is backend/api/dto.go -> swaggo -> shared-schemas/swagger.json; the committed src/schema.d.ts is generated from it (see api-client/README.md). Regenerate with `pnpm run generate-types` and bump the version before pushing.
 #
-# on:
-#   push:
-#     branches: [main]
-#
-# permissions:
-#   contents: read
-#
-# jobs:
-#   # Diff against the prior commit rather than a top-level on.push.paths filter, so this workflow always starts and we just skip the publish when nothing relevant changed (the run stays green).
-#   changes:
-#     name: Detect api-client changes
-#     runs-on: ubuntu-latest
-#     outputs:
-#       client: ${{ steps.filter.outputs.client }}
-#     steps:
-#       - uses: actions/checkout@v4
-#       - uses: dorny/paths-filter@v3
-#         id: filter
-#         with:
-#           filters: |
-#             client:
-#               - 'api-client/**'
-#               - 'shared-schemas/swagger.json'
-#
-#   publish:
-#     name: Build & publish to npm
-#     needs: changes
-#     if: needs.changes.outputs.client == 'true'
-#     runs-on: ubuntu-latest
-#     defaults:
-#       run:
-#         working-directory: api-client
-#     steps:
-#       - uses: actions/checkout@v4
-#
-#       - uses: pnpm/action-setup@v4
-#
-#       - uses: actions/setup-node@v4
-#         with:
-#           node-version: 22
-#           registry-url: https://registry.npmjs.org
-#           cache: pnpm
-#           cache-dependency-path: api-client/pnpm-lock.yaml
-#
-#       # prepare runs tsc, compiling src/schema.d.ts + src/index.ts into dist/ (the published files).
-#       - name: Install (runs prepare -> build)
-#         run: pnpm install --frozen-lockfile
-#
-#       # Publishing the same version twice fails; guard so an unrelated api-client change (README, tooling) doesn't red the run. Bump the version to actually ship a new release.
-#       - name: Publish if the version is new
-#         env:
-#           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-#         run: |
-#           NAME=$(node -p "require('./package.json').name")
-#           VERSION=$(node -p "require('./package.json').version")
-#           if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-#             echo "$NAME@$VERSION already published — skipping."
-#           else
-#             echo "Publishing $NAME@$VERSION"
-#             npm publish
-#           fi
+# Publishes via npm's trusted publisher: npm mints a short-lived credential from the OIDC id-token and attaches provenance automatically. Register api-client's package on npmjs.com as a trusted publisher for this repo + workflow before the first run.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write  # required for npm trusted publishing (OIDC)
+
+jobs:
+  # Gate on the package.json version, not a file diff: a version bump is the only thing that ships a release, so ask the registry whether this version already exists and skip the whole build+publish when it does. An api-client change without a bump (README, tooling) leaves the version published and is correctly skipped.
+  version:
+    name: Check version is new
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - id: check
+        working-directory: api-client
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION already published — skipping."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$NAME@$VERSION is new — will publish."
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish:
+    name: Build & publish to npm
+    needs: version
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api-client
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      # Node 24 bundles npm >= 11.5.1, the minimum for trusted publishing.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: api-client/pnpm-lock.yaml
+
+      # prepare runs tsc, compiling src/schema.d.ts + src/index.ts into dist/ (the published files).
+      - name: Install (runs prepare -> build)
+        run: pnpm install --frozen-lockfile
+
+      # The version job already confirmed this version is unpublished. Auth is via the OIDC id-token granted by the workflow's id-token: write permission.
+      - name: Publish
+        run: npm publish

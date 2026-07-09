@@ -48,7 +48,7 @@ git commit -am "chore: bump version to 0.1.1"
 
 #### Publishing (automated, public npm)
 
-Pushing to `main` with a changed `version` auto-publishes to the **public npm registry** via `.github/workflows/cd-api-client.yml`, using the repo's `NPM_TOKEN` secret.
+Pushing to `main` with a changed `version` auto-publishes to the **public npm registry** via `.github/workflows/cd-api-client.yml`.
 
 To publish manually:
 
