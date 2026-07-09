@@ -149,7 +149,7 @@ func main() {
 	r.Use(middleware.Recoverer)
 	r.Use(sentryhttp.New(sentryhttp.Options{Repanic: true}).Handle)
 
-	// The browser talks to identity directly for login: app frontends POST to /v1/auth/request and /v1/auth/verify here (identity is the sole issuer), so those calls are cross-origin and need CORS. We allow any origin at the app and enforce which frontends may actually reach identity at the Cloudflare edge instead — that keeps origin policy in one place and lets a new app come online without a code change. Wildcard is safe here because identity authenticates with bearer tokens in the Authorization header, not cookies, so there are no credentialed requests to widen (browsers forbid "*" + credentials anyway).
+	// The browser talks to identity directly for login: app frontends POST to /v1/auth/request-code and /v1/auth/verify-code here (identity is the sole issuer), so those calls are cross-origin and need CORS. We allow any origin at the app and enforce which frontends may actually reach identity at the Cloudflare edge instead — that keeps origin policy in one place and lets a new app come online without a code change. Wildcard is safe here because identity authenticates with bearer tokens in the Authorization header, not cookies, so there are no credentialed requests to widen (browsers forbid "*" + credentials anyway).
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins: []string{"*"},
 		AllowedMethods: []string{"GET", "POST", "OPTIONS"},
@@ -167,8 +167,8 @@ func main() {
 	r.Route("/v1", func(r chi.Router) {
 		// Passwordless login: request a 6-digit code by email, then exchange it for a token whose entitlement reflects the account's current suite-wide access.
 		r.Route("/auth", func(r chi.Router) {
-			r.Post("/request", handlers.AuthRequest)
-			r.Post("/verify", handlers.AuthVerify)
+			r.Post("/request-code", handlers.AuthRequestCode)
+			r.Post("/verify-code", handlers.AuthVerifyCode)
 		})
 
 		// Billing: Stripe posts subscription lifecycle events here; we resolve them to the single suite-wide entitlement. Signature-verified (stub today).

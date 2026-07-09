@@ -3,13 +3,13 @@ package api
 
 import "github.com/google/uuid"
 
-// AuthRequestInput is the body of POST /v1/auth/request.
-type AuthRequestInput struct {
+// AuthRequestCodeInput is the body of POST /v1/auth/request-code.
+type AuthRequestCodeInput struct {
 	Email string `json:"email" validate:"required"`
 }
 
-// AuthVerifyInput is the body of POST /v1/auth/verify.
-type AuthVerifyInput struct {
+// AuthVerifyCodeInput is the body of POST /v1/auth/verify-code.
+type AuthVerifyCodeInput struct {
 	Email string `json:"email" validate:"required"`
 	Code  string `json:"code" validate:"required"`
 }
@@ -27,7 +27,7 @@ type User struct {
 	Email string    `json:"email"`
 }
 
-// VerifyResponse is returned by POST /v1/auth/verify: the session token plus the account it belongs to.
+// VerifyResponse is returned by POST /v1/auth/verify-code: the session token plus the account it belongs to.
 type VerifyResponse struct {
 	Token string `json:"token"`
 	User  User   `json:"user"`
@@ -39,7 +39,7 @@ type GrantResponse struct {
 	Plan   string    `json:"plan"`
 }
 
-// MessageResponse is a generic single-message body (e.g. the deliberately vague acknowledgement returned by POST /v1/auth/request).
+// MessageResponse is a generic single-message body (e.g. the deliberately vague acknowledgement returned by POST /v1/auth/request-code).
 type MessageResponse struct {
 	Message string `json:"message"`
 }

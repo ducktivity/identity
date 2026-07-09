@@ -14,10 +14,10 @@ import (
 	"github.com/ducktivity/identity/backend/token"
 )
 
-// AuthRequest sends a 6-digit login code, creating the account if needed. It always returns a generic acknowledgement so it cannot probe which emails have accounts.
-func AuthRequest(w http.ResponseWriter, r *http.Request) {
+// AuthRequestCode sends a 6-digit login code, creating the account if needed. It always returns a generic acknowledgement so it cannot probe which emails have accounts.
+func AuthRequestCode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	var in api.AuthRequestInput
+	var in api.AuthRequestCodeInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeErr(w, http.StatusBadRequest, "Invalid JSON payload")
 		return
@@ -61,10 +61,10 @@ func AuthRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.MessageResponse{Message: "If that email is valid, a code is on its way."})
 }
 
-// AuthVerify exchanges a valid email + code for a session token. The token carries the account's current suite-wide entitlement, so every app learns paid access from the token alone.
-func AuthVerify(w http.ResponseWriter, r *http.Request) {
+// AuthVerifyCode exchanges a valid email + code for a session token. The token carries the account's current suite-wide entitlement, so every app learns paid access from the token alone.
+func AuthVerifyCode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	var in api.AuthVerifyInput
+	var in api.AuthVerifyCodeInput
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		writeErr(w, http.StatusBadRequest, "Invalid JSON payload")
 		return

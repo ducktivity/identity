@@ -24,25 +24,25 @@ flowchart LR
     neon["Neon<br/>(identity schema)"]
     resend["Resend<br/>(login emails)"]
 
-    browser -- "POST /v1/auth/request" --> id
+    browser -- "POST /v1/auth/request-code" --> id
     id -- "6-digit code" --> resend
-    browser -- "POST /v1/auth/verify" --> id
+    browser -- "POST /v1/auth/verify-code" --> id
     id -- "signed token" --> browser
     browser -- "token in Authorization" --> app
     app -- "GET /.well-known/jwks.json<br/>(verify signature)" --> id
     id --> neon
 ```
 
-1. A frontend POSTs to `/v1/auth/request`; identity emails (or, in dev, logs) a 6-digit code.
-2. The frontend POSTs the code to `/v1/auth/verify`; identity returns a signed token carrying the account's current suite-wide entitlement.
+1. A frontend POSTs to `/v1/auth/request-code`; identity emails (or, in dev, logs) a 6-digit code.
+2. The frontend POSTs the code to `/v1/auth/verify-code`; identity returns a signed token carrying the account's current suite-wide entitlement.
 3. App backends verify that token's signature against the public key from `/.well-known/jwks.json` — they never talk to identity per-request, and never hold the signing key.
 
 ## Endpoints
 
 | Route                        | What                                                        |
 | ---------------------------- | ----------------------------------------------------------- |
-| `POST /v1/auth/request`      | Email a login code.                                         |
-| `POST /v1/auth/verify`       | Exchange a code for a signed token.                         |
+| `POST /v1/auth/request-code` | Email a login code.                                         |
+| `POST /v1/auth/verify-code`  | Exchange a code for a signed token.                         |
 | `POST /v1/billing/webhook`   | Stripe subscription events → suite-wide entitlement (stub). |
 | `POST /v1/dev/grant`         | Dev-only: flip entitlement without Stripe.                  |
 | `GET /.well-known/jwks.json` | Public key set apps fetch to verify tokens.                 |
