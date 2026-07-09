@@ -76,6 +76,10 @@ func loadConfig() config {
 	}
 }
 
+// @title Ducktivity Identity API
+// @version 1.0
+// @description Central account and token service for the Ducktivity suite: passwordless email-OTP login and the SOLE issuer of session tokens. The login endpoints below are the only client-facing contract other apps consume (cross-origin, pre-auth); every token-authenticated endpoint lives on an app's own backend, which merely verifies the token minted here.
+// @BasePath /
 func main() {
 	resolveBuildInfo()
 	_ = godotenv.Load()

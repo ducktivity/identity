@@ -45,3 +45,14 @@ jobs:
           version: latest
           install-go: false
           working-directory: backend
+
+      # Generated-artifact drift check. shared-schemas/swagger.json is the committed output of swaggo run over the backend's swaggo comments — the API contract's source of truth. Re-run the generator and assert the working tree is unchanged: a non-empty diff means someone changed a route or DTO without regenerating, so the committed spec has drifted. Check only — it fails the job rather than committing the regenerated file. swag is the same go-tool version scripts/export-swagger.sh uses.
+      - name: Generated-artifact drift (swagger)
+        run: |
+          ./scripts/export-swagger.sh
+          if [ -n "$(git status --porcelain -- ../shared-schemas/swagger.json)" ]; then
+            echo "::error::shared-schemas/swagger.json is stale. Run ./scripts/export-swagger.sh from backend/ and commit the result."
+            git status --porcelain -- ../shared-schemas/swagger.json
+            git diff -- ../shared-schemas/swagger.json
+            exit 1
+          fi

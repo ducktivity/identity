@@ -1,0 +1,196 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "Central account and token service for the Ducktivity suite: passwordless email-OTP login and the SOLE issuer of session tokens. The login endpoints below are the only client-facing contract other apps consume (cross-origin, pre-auth); every token-authenticated endpoint lives on an app's own backend, which merely verifies the token minted here.",
+        "title": "Ducktivity Identity API",
+        "contact": {},
+        "version": "1.0"
+    },
+    "basePath": "/",
+    "paths": {
+        "/v1/auth/request-code": {
+            "post": {
+                "description": "Emails a 6-digit login code, creating the account if the address is new. Always returns a generic acknowledgement so it cannot reveal whether an account exists.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Request a login code",
+                "parameters": [
+                    {
+                        "description": "Email to send the login code to",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.AuthRequestCodeInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Deliberately vague acknowledgement",
+                        "schema": {
+                            "$ref": "#/definitions/api.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid email",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Asked again before the resend cooldown elapsed",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/auth/verify-code": {
+            "post": {
+                "description": "Exchanges an email + 6-digit code for a session token. The token carries the account's current suite-wide entitlement, so every app learns paid access from the token alone.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "Verify a login code",
+                "parameters": [
+                    {
+                        "description": "Email and the code that was emailed",
+                        "name": "payload",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/api.AuthVerifyCodeInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "The session token plus the account it belongs to",
+                        "schema": {
+                            "$ref": "#/definitions/api.VerifyResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Malformed body or invalid email",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Invalid or expired code",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "schema": {
+                            "$ref": "#/definitions/api.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "api.AuthRequestCodeInput": {
+            "type": "object",
+            "required": [
+                "email"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.AuthVerifyCodeInput": {
+            "type": "object",
+            "required": [
+                "code",
+                "email"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "email": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.ErrorResponse": {
+            "type": "object",
+            "required": [
+                "error"
+            ],
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.MessageResponse": {
+            "type": "object",
+            "required": [
+                "message"
+            ],
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.User": {
+            "type": "object",
+            "required": [
+                "email",
+                "id"
+            ],
+            "properties": {
+                "email": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                }
+            }
+        },
+        "api.VerifyResponse": {
+            "type": "object",
+            "required": [
+                "token",
+                "user"
+            ],
+            "properties": {
+                "token": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/api.User"
+                }
+            }
+        }
+    }
+}

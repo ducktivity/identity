@@ -14,6 +14,19 @@ import (
 	"github.com/ducktivity/identity/backend/token"
 )
 
+// AuthRequestCode godoc
+// @Summary      Request a login code
+// @Description  Emails a 6-digit login code, creating the account if the address is new. Always returns a generic acknowledgement so it cannot reveal whether an account exists.
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        payload  body      api.AuthRequestCodeInput  true  "Email to send the login code to"
+// @Success      200      {object}  api.MessageResponse       "Deliberately vague acknowledgement"
+// @Failure      400      {object}  api.ErrorResponse         "Invalid email"
+// @Failure      429      {object}  api.ErrorResponse         "Asked again before the resend cooldown elapsed"
+// @Failure      500      {object}  api.ErrorResponse         "Internal server error"
+// @Router       /v1/auth/request-code [post]
+//
 // AuthRequestCode sends a 6-digit login code, creating the account if needed. It always returns a generic acknowledgement so it cannot probe which emails have accounts.
 func AuthRequestCode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -61,6 +74,19 @@ func AuthRequestCode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.MessageResponse{Message: "If that email is valid, a code is on its way."})
 }
 
+// AuthVerifyCode godoc
+// @Summary      Verify a login code
+// @Description  Exchanges an email + 6-digit code for a session token. The token carries the account's current suite-wide entitlement, so every app learns paid access from the token alone.
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        payload  body      api.AuthVerifyCodeInput  true  "Email and the code that was emailed"
+// @Success      200      {object}  api.VerifyResponse       "The session token plus the account it belongs to"
+// @Failure      400      {object}  api.ErrorResponse        "Malformed body or invalid email"
+// @Failure      401      {object}  api.ErrorResponse        "Invalid or expired code"
+// @Failure      500      {object}  api.ErrorResponse        "Internal server error"
+// @Router       /v1/auth/verify-code [post]
+//
 // AuthVerifyCode exchanges a valid email + code for a session token. The token carries the account's current suite-wide entitlement, so every app learns paid access from the token alone.
 func AuthVerifyCode(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
