@@ -17,7 +17,7 @@ permissions:
 jobs:
   # Gate on the package.json version, not a file diff: a version bump is the only thing that ships a release, so ask the registry whether this version already exists and skip the whole build+publish when it does. An api-client change without a bump (README, tooling) leaves the version published and is correctly skipped.
   version:
-    name: Check version is new
+    name: Decide whether to publish
     runs-on: ubuntu-latest
     outputs:
       publish: ${{ steps.check.outputs.publish }}
@@ -44,6 +44,7 @@ jobs:
     needs: version
     if: needs.version.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    environment: production
     defaults:
       run:
         working-directory: api-client
