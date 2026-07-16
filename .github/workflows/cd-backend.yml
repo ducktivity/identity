@@ -7,6 +7,8 @@ name: Backend CD
 on:
   push:
     branches: [main]
+  # Manual "Run workflow" button for on-demand releases/redeploys of the chosen ref's tip (e.g. re-publish the image after a box-side change, or ship a commit the path filter skipped). It builds that commit's sha-<gitsha> image and runs the full pipeline; see the workflow_dispatch bypass on `changes.run` below.
+  workflow_dispatch:
 
 # Least privilege by default; the image job widens to packages: write.
 permissions:
@@ -19,6 +21,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
+      # Run the pipeline (check -> migrate -> image) when backend/ changed. A manual workflow_dispatch always runs it — there is no push diff for the path filter to read, so bypass it.
+      run: ${{ steps.filter.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -35,14 +39,14 @@ jobs:
   check:
     name: Verify backend
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.run == 'true'
     uses: ./.github/workflows/_backend-check.yml
 
   # Migrations run here, against Neon, BEFORE the image is published. Expand-only, so schema and old container stay compatible until the manual box reconcile. Uses the production environment for DATABASE_URL_MIGRATOR; restrict that environment to main in repo settings.
   migrate:
     name: Apply migrations (goose -> Neon)
     needs: [changes, check]
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -65,7 +69,7 @@ jobs:
   image:
     name: Build & push image to GHCR
     needs: [changes, check, migrate]
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
