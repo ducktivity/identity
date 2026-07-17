@@ -1,6 +1,6 @@
 {
   "name": "@ducktivity/identity-client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Generated TypeScript client and types for the Ducktivity identity service.",
   "type": "module",
   "main": "./dist/index.js",
