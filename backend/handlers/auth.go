@@ -16,14 +16,13 @@ import (
 
 // AuthRequestCode godoc
 // @Summary      Request a login code
-// @Description  Emails a 6-digit login code, creating the account if the address is new. Always returns a generic acknowledgement so it cannot reveal whether an account exists.
+// @Description  Emails a 6-digit login code, creating the account if the address is new. Always returns a generic acknowledgement so it cannot reveal whether an account exists. Within the resend cooldown it acknowledges without sending a new code, leaving the still-valid one in place.
 // @Tags         auth
 // @Accept       json
 // @Produce      json
 // @Param        payload  body      api.AuthRequestCodeInput  true  "Email to send the login code to"
 // @Success      200      {object}  api.MessageResponse       "Deliberately vague acknowledgement"
 // @Failure      400      {object}  api.ErrorResponse         "Invalid email"
-// @Failure      429      {object}  api.ErrorResponse         "Asked again before the resend cooldown elapsed"
 // @Failure      500      {object}  api.ErrorResponse         "Internal server error"
 // @Router       /v1/auth/request-code [post]
 //
@@ -47,10 +46,12 @@ func AuthRequestCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Per-account cooldown: refuse if the most recent still-valid code is too fresh.
+	// Per-account cooldown: if the most recent still-valid code is too fresh, skip the
+	// resend and acknowledge, so a user who closed the modal can just enter the code they
+	// already have instead of being blocked from continuing.
 	if _, createdAt, err := store.GetLatestActiveAuthCode(ctx, u.ID); err == nil {
 		if time.Since(createdAt) < auth.ResendCooldown {
-			writeErr(w, http.StatusTooManyRequests, "Please wait a moment before requesting another code")
+			writeJSON(w, http.StatusOK, api.MessageResponse{Message: "If that email is valid, a code is on its way."})
 			return
 		}
 	} else if !errors.Is(err, pgx.ErrNoRows) {

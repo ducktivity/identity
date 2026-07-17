@@ -10,7 +10,7 @@
     "paths": {
         "/v1/auth/request-code": {
             "post": {
-                "description": "Emails a 6-digit login code, creating the account if the address is new. Always returns a generic acknowledgement so it cannot reveal whether an account exists.",
+                "description": "Emails a 6-digit login code, creating the account if the address is new. Always returns a generic acknowledgement so it cannot reveal whether an account exists. Within the resend cooldown it acknowledges without sending a new code, leaving the still-valid one in place.",
                 "consumes": [
                     "application/json"
                 ],
@@ -41,12 +41,6 @@
                     },
                     "400": {
                         "description": "Invalid email",
-                        "schema": {
-                            "$ref": "#/definitions/api.ErrorResponse"
-                        }
-                    },
-                    "429": {
-                        "description": "Asked again before the resend cooldown elapsed",
                         "schema": {
                             "$ref": "#/definitions/api.ErrorResponse"
                         }

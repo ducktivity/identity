@@ -15,7 +15,7 @@ export interface paths {
         put?: never;
         /**
          * Request a login code
-         * @description Emails a 6-digit login code, creating the account if the address is new. Always returns a generic acknowledgement so it cannot reveal whether an account exists.
+         * @description Emails a 6-digit login code, creating the account if the address is new. Always returns a generic acknowledgement so it cannot reveal whether an account exists. Within the resend cooldown it acknowledges without sending a new code, leaving the still-valid one in place.
          */
         post: {
             parameters: {
@@ -42,15 +42,6 @@ export interface paths {
                 };
                 /** @description Invalid email */
                 400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["api.ErrorResponse"];
-                    };
-                };
-                /** @description Asked again before the resend cooldown elapsed */
-                429: {
                     headers: {
                         [name: string]: unknown;
                     };
