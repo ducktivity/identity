@@ -1,8 +1,10 @@
 name: Backend CD
 
-# On push to main (when backend/ changed): re-verify the commit, run the expand-only goose migration from the runner straight at Neon, then — only if it succeeds — build and push the image to GHCR. That is where CI stops.
+# On push to main that touches backend/ or deploy/: re-verify the commit, run the expand-only goose migration from the runner straight at Neon, then — only if it succeeds — build and push the image to GHCR (immutable sha-<gitsha> + moving latest), then PUSH the deploy onto the box.
 #
-# CI holds NO SSH access to the box and never flips the live service. Going live is a deliberate manual step: the operator runs deploy/remote-deploy.sh from their machine, which copies the compose file + .env to the box and reconciles the stack over SSH (pull the new sha-tag, `compose up`, gate on /readyz, and auto-rollback). Expand-only migrations mean the still-running old container keeps working against the new schema until that manual cutover.
+# Deploy is push-based: the `deploy` job SSHes to the box over Cloudflare Access using a short-lived certificate minted from a service token (no standing SSH key, no public port 22) and runs deploy/deploy.sh <sha>, which checks out that commit, sops-decrypts .env, brings the stack up at the matching sha-<gitsha>, and gates on /readyz — rolling back on the box if it fails. Because that runs synchronously here, a failed deploy turns THIS job red and notifies you through the normal Actions failure path; there is no separate deploy-health alert. Expand-only migrations keep the old container valid against the new schema during the brief cutover.
+#
+# A deploy/-only change (deploy.sh, ssh-forced-command.sh, compose, …) runs the SAME full pipeline rather than a standalone deploy, so the commit gets its own sha-<gitsha> image (backend layers are cached, so the rebuild is near-instant) — deploy.sh pins that exact sha, so skipping the image job would leave it with no tag to pull. A push touching neither backend/ nor deploy/ skips every job below and stays green.
 
 on:
   push:
@@ -21,19 +23,20 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
-      # Run the pipeline (check -> migrate -> image) when backend/ changed. A manual workflow_dispatch always runs it — there is no push diff for the path filter to read, so bypass it.
-      run: ${{ steps.filter.outputs.backend == 'true' || github.event_name == 'workflow_dispatch' }}
+      deploy: ${{ steps.filter.outputs.deploy }}
+      # Run the full pipeline (check -> migrate -> image -> deploy) when EITHER backend/ or deploy/ changed. A deploy/-only change must still build an image: deploy.sh pins sha-<gitsha> of the deployed commit, and that tag would not exist if we skipped the image job. A manual workflow_dispatch always runs it — there is no push diff for the path filter to read, so bypass it.
+      run: ${{ steps.filter.outputs.backend == 'true' || steps.filter.outputs.deploy == 'true' || github.event_name == 'workflow_dispatch' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
         id: filter
         with:
-          # 'every' = a file must match ALL patterns to count. Without it paths-filter ORs the list, so the '!backend/scripts/**' exclusion is ignored (any backend/** file, and even non-backend files, satisfy the negation) and the filter fires on every push.
-          predicate-quantifier: 'every'
+          # Any change under backend/ or deploy/ triggers a release. Both are single positive globs, so paths-filter ORs the file list — no predicate-quantifier needed.
           filters: |
             backend:
               - 'backend/**'
-              - '!backend/scripts/**'
+            deploy:
+              - 'deploy/**'
 
   # Belt-and-suspenders: re-verify the exact commit before we migrate/publish it. Same reusable gate the PR runs. Skipped (run stays green) when backend is unchanged.
   check:
@@ -42,7 +45,7 @@ jobs:
     if: needs.changes.outputs.run == 'true'
     uses: ./.github/workflows/_backend-check.yml
 
-  # Migrations run here, against Neon, BEFORE the image is published. Expand-only, so schema and old container stay compatible until the manual box reconcile. Uses the production environment for DATABASE_URL_MIGRATOR; restrict that environment to main in repo settings.
+  # Migrations run here, against Neon, BEFORE the image is published. Expand-only, so the schema and the old container stay compatible during the brief window before the box auto-reconciles. Uses the production environment for DATABASE_URL_MIGRATOR; restrict that environment to main in repo settings.
   migrate:
     name: Apply migrations (goose -> Neon)
     needs: [changes, check]
@@ -65,10 +68,10 @@ jobs:
           DBSTRING: ${{ secrets.DATABASE_URL_MIGRATOR }}
         run: go tool goose -dir sql/schema postgres "$DBSTRING" up
 
-  # Publish only after the gate passed AND the migration applied. When the backend is unchanged, `latest` already points at the correct image — nothing to build.
   image:
     name: Build & push image to GHCR
     needs: [changes, check, migrate]
+    # Publish only after the gate passed AND the migration applied. Runs for a deploy/-only change too (backend cached, near-instant rebuild) so that commit gets its own sha-<gitsha> tag for deploy.sh to pin — latest alone is not enough because deploy.sh pins the exact sha.
     if: needs.changes.outputs.run == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -116,3 +119,46 @@ jobs:
             BUILD_TIME=${{ steps.bm.outputs.build_time }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to box (SSH over Cloudflare Access)
+    needs: [changes, check, migrate, image]
+    # Deploy after this commit's image is published. check/migrate/image now run for any backend/ or deploy/ change (changes.run), so a plain needs-success gate is correct — deploy runs only once all upstream jobs pass, and is skipped (with them) on a push that touches neither.
+    if: needs.changes.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - name: Install cloudflared
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o "$RUNNER_TEMP/cloudflared"
+          sudo install -m 0755 "$RUNNER_TEMP/cloudflared" /usr/local/bin/cloudflared
+          cloudflared --version
+
+      - name: Deploy over Access SSH
+        env:
+          # The service token authenticates the Access application in front of the SSH hostname; `cloudflared access ssh` (the ProxyCommand) reads these two env vars to open the tunnel. sshd auth is the SSH key below — separate factor.
+          TUNNEL_SERVICE_TOKEN_ID: ${{ secrets.TUNNEL_SERVICE_TOKEN_ID }}
+          TUNNEL_SERVICE_TOKEN_SECRET: ${{ secrets.TUNNEL_SERVICE_TOKEN_SECRET }}
+          SSH_HOSTNAME: ${{ vars.DEPLOY_SSH_HOSTNAME }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # No pinned host key: each runner is ephemeral (fresh known_hosts every run), so any
+          # pin would be trust-on-first-use anyway. Connection integrity to the box is provided
+          # by Cloudflare Access — the tunnel is gated by the service token and the box has no
+          # public sshd — so accept-new here rather than carry a DEPLOY_SSH_KNOWN_HOSTS secret.
+          cat > ~/.ssh/config <<EOF
+          Host $SSH_HOSTNAME
+              HostName $SSH_HOSTNAME
+              User deploy
+              IdentityFile ~/.ssh/deploy_key
+              IdentitiesOnly yes
+              ProxyCommand /usr/local/bin/cloudflared access ssh --hostname %h
+              StrictHostKeyChecking accept-new
+          EOF
+          # The box's authorized_keys forces deploy/ssh-forced-command.sh, which reads this whole command from $SSH_ORIGINAL_COMMAND, parses out the 40-hex sha, and execs deploy.sh with it. Send the full path + sha so that wrapper's `.../deploy.sh <sha>` pattern matches.
+          ssh "$SSH_HOSTNAME" "/opt/ducktivity/identity/deploy/deploy.sh ${{ github.sha }}"

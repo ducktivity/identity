@@ -1,10 +1,12 @@
-# Identity service runtime stack: just the Go app. Ingress (the shared cloudflared) and log shipping (the shared vector) both live in the edge stack; this app attaches to the external `ducktivity_edge` network and carries the collect_logs label so the edge vector tails it. The box pulls the image from GHCR; values come from the .env CI renders on each deploy.
+# Identity service runtime stack: just the Go app. Ingress (the shared cloudflared) and log shipping (the shared vector) both live in the edge stack; this app attaches to the external `ducktivity_edge` network and carries the collect_logs label so the edge vector tails it. The box pulls the image from GHCR; values come from the .env deploy.sh sops-decrypts on each reconcile.
+# Pin the Compose project name so it never drifts with the directory this file lives in (container stays identity-app-1 regardless of where compose runs from).
+name: identity
 services:
   app:
-    # CI publishes this image. IMAGE_TAG is exported by deploy/remote-deploy.sh to pin a specific sha-<gitsha> (and to roll back); it defaults to latest for local use.
+    # On the box we PULL this prebuilt image (CI publishes it to GHCR). IMAGE_TAG is exported by deploy.sh/remote-deploy.sh to pin a specific sha-<gitsha> (and to roll back); it defaults to the moving `latest` for local use. For local dev you can build from ../backend via the build: block below.
     image: ghcr.io/ducktivity/identity-backend:${IMAGE_TAG:-latest}
     build:
-      context: ./backend
+      context: ../backend
     environment:
       ENV: ${ENV:-development}
       # Every suite backend listens on 8000 inside its container; apps are told apart by their network alias (identity-backend), not by port.
@@ -27,7 +29,7 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
       # App-role connection string (least privilege; migrations use a separate role).
       DATABASE_URL: ${DATABASE_URL}
-    # No host port is published: ingress is network-only. The shared cloudflared routes id.ducktvt.com -> identity-backend:8000 over ducktivity_edge, and the deploy's /readyz check reaches that same address (see deploy/remote-deploy.sh). The alias must be unique across the suite since every app's service is named "app" internally.
+    # No host port is published: ingress is network-only. The shared cloudflared routes id.ducktvt.com -> identity-backend:8000 over ducktivity_edge, and deploy.sh's /readyz check reaches that same address from a throwaway curl container. The alias must be unique across the suite since every app's service is named "app" internally.
     networks:
       ducktivity_edge:
         aliases:

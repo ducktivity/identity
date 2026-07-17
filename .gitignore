@@ -1,8 +1,13 @@
-# Local env (real secrets never live in git — prod secrets are GitHub Environment secrets, dev values stay on your machine).
+# Local env. The box's prod secrets ARE committed, but only SOPS-encrypted as deploy/.env.sops; the plaintext .env.prod and the box-decrypted .env never are.
 backend/.env
 .env
 .env.prod
 out.env
+
+# Deploy SSH keypair (generated during box setup, then deleted) and box-local deploy state — must never be committed.
+deploy/deploy_ci_key
+deploy/deploy_ci_key.pub
+deploy/.last_good_tag
 
 # Go build output
 backend/identity

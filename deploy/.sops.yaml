@@ -1,0 +1,17 @@
+# SOPS creation rules for the committed box secrets (.env.sops). When you encrypt/edit .env.sops, sops matches it here and encrypts to BOTH age recipients below:
+#   - the BOX key   — its private half lives only on the box (SOPS_AGE_KEY_FILE) and lets deploy.sh decrypt on the fly; the box never holds a shared password.
+#   - the OPERATOR  — your private half (age-keygen output) lets you edit secrets locally.
+# Only VALUES are encrypted; keys stay readable, so `git diff` shows which var changed.
+#
+# One-time setup:
+#   1. On the box:      age-keygen -o /etc/ducktivity/age-key.txt   (chmod 600, back it up OFF the box; losing it means re-provisioning secrets), then grab its public line ("Public key: age1...") -> BOX key below.
+#   2. On your laptop:  age-keygen -o ~/.config/sops/age/keys.txt, then grab its public line -> OPERATOR key below.
+#   3. Fill both keys in, then: deploy/secrets.sh encrypt   (creates .env.sops from your local .env.prod). Commit .env.sops.
+#
+# Rotating: re-run `sops updatekeys .env.sops` after changing recipients here.
+creation_rules:
+  - path_regex: (^|/)\.env\.(prod|sops)$
+    key_groups:
+      - age:
+          - age1mcemuc5wwr67tpk28fhcv0dq2hkx47kp6gkzdnn40eplg8yhkuzq7aamzj
+          - age1hwtpnd8qttvjr3mgs92wg6qnj40vxghg226stt7xwwhrm9ycxfzq64g9g9

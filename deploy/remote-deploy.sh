@@ -1,72 +1,105 @@
 #!/usr/bin/env bash
-# Runs on YOUR machine (Git Bash / WSL), NOT the box. One command to go live: copies the compose file and your local .env.prod (landed on the box as .env, which compose auto-loads) to the box over Cloudflare Access SSH, then reconciles the stack on the box (pull -> up -> /readyz -> auto-rollback) — the box-side steps are streamed inline over SSH, so there is no second script to maintain. No secrets live in git or GitHub; your secrets stay in identity/.env.prod on your disk only.
+# Runs on YOUR machine with an UNRESTRICTED ssh key — the manual, owner-driven deploy/rollback. Bootstrapping sibling of deploy.sh (CI's restricted-key path): where deploy.sh assumes a clone exists, this converges the box from nothing. Box-side steps stream inline over Cloudflare Access SSH (bash -s), so there's no second script.
 #
-# Migrations are NOT run here; CI applies them (expand-only) when it builds the image, so the tag you deploy already has its schema live.
+# Carries nothing to the box: secrets live only as the committed deploy/.env.sops, decrypted on the box with SOPS (same as deploy.sh). Image is pinned from the SHA arg (sha-<short>), gated on /readyz, auto-rolled-back to the last-good tag.
 #
-# Prereqs on your machine: cloudflared installed + the Cloudflare Access service token sourced (TUNNEL_SERVICE_TOKEN_ID / TUNNEL_SERVICE_TOKEN_SECRET), and a filled identity/.env.prod (copy from .env.example).
+# Migrations run in CI, not here — this is an IMAGE revert only; never down-migrate the schema.
 #
-# Usage:  ./deploy/remote-deploy.sh <image-tag>      e.g. sha-1a2b3c4  (or latest)
+# Prereqs — machine: cloudflared + sourced Access service token (TUNNEL_SERVICE_TOKEN_ID/SECRET). Box: SOPS age key at /etc/ducktivity/age-key.txt, docker, and git/GHCR creds for the first-run clone + (if private) image pull.
+#
+# Usage:  ./deploy/remote-deploy.sh <full-git-sha>   (40-hex; deploy or roll back to that commit)
 set -euo pipefail
-cd "$(dirname "$0")/.."   # repo root (identity/)
 
-TAG="${1:?usage: remote-deploy.sh <image-tag>   e.g. sha-1a2b3c4}"
+SHA="${1:?usage: remote-deploy.sh <full-git-sha>   (40-hex; deploy or roll back to that commit)}"
+# git checkout needs the real object; IMAGE_TAG is sha-<first 7 hex>.
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "error: expected a full 40-hex git sha, got: '$SHA'" >&2; exit 2; }
 
 # Overridable config (sane suite defaults).
 SSH_HOST="${SSH_HOST:-ducktivity-ssh.ducktvt.com}"
 SSH_USER="${SSH_USER:-deploy}"
-APP_DIR="${APP_DIR:-/opt/ducktivity/identity}"
-SECRETS="${SECRETS:-.env.prod}"   # local, git-ignored
+APP_DIR="${APP_DIR:-/opt/ducktivity/identity}"            # clone root; compose project root is $APP_DIR/deploy
+REPO_URL="${REPO_URL:-https://github.com/ducktivity/identity.git}"   # first-run clone only
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"                    # fetched so the sha's object (fwd or rollback) is present
 
-[ -f "$SECRETS" ] || { echo "error: $SECRETS not found — copy .env.example to .env.prod and fill it." >&2; exit 1; }
-
-# SSH rides Cloudflare Access (no open port on the box). ProxyCommand needs cloudflared + a sourced service token; see the prereqs above.
-SSH_OPTS=(-o "ProxyCommand=cloudflared access ssh --hostname %h" -o StrictHostKeyChecking=accept-new)
+# SSH rides Cloudflare Access (no open port). ProxyCommand needs cloudflared + a sourced service token.
+SSH_OPTS=(-o "ProxyCommand=cloudflared access ssh --hostname %h")
 DEST="$SSH_USER@$SSH_HOST"
 
-echo "==> staging runtime files on $DEST:$APP_DIR"
-ssh "${SSH_OPTS[@]}" "$DEST" "mkdir -p '$APP_DIR'"
-scp "${SSH_OPTS[@]}" docker-compose.yml "$DEST:$APP_DIR/docker-compose.yml"
-scp "${SSH_OPTS[@]}" "$SECRETS"         "$DEST:$APP_DIR/.env"
-
-# Optional: authenticate the box to GHCR if the image package is private. Skip this by leaving GHCR_TOKEN unset and making the GHCR package public instead.
+# Optional: log the box in to GHCR for a private image. Skip by leaving GHCR_TOKEN unset and making the package public.
 if [ -n "${GHCR_TOKEN:-}" ]; then
   echo "==> logging box in to GHCR"
   ssh "${SSH_OPTS[@]}" "$DEST" "echo '$GHCR_TOKEN' | docker login ghcr.io -u '${GHCR_USER:-$SSH_USER}' --password-stdin"
 fi
 
-echo "==> reconciling to $TAG"
-# The reconcile runs ON THE BOX: pull the new image, swap the stack, wait for /readyz, and roll back to the last good tag if the new one never reports ready — so the deploy self-heals. The body is streamed over SSH (bash -s) with APP_DIR and the tag passed as positional args; the quoted heredoc keeps it literal so nothing expands locally. IMAGE_TAG in the shell env overrides docker-compose's default, so we never edit files to pin a tag. The app image is distroless (no curl), so /readyz is probed from a throwaway curl container on the shared edge network — every suite backend listens on 8000.
-ssh "${SSH_OPTS[@]}" "$DEST" "bash -s -- '$APP_DIR' '$TAG'" <<'REMOTE'
+echo "==> deploying git sha $SHA on $DEST"
+# Reconcile runs on the box; args passed positionally, quoted heredoc stays literal.
+ssh "${SSH_OPTS[@]}" "$DEST" "bash -s -- '$APP_DIR' '$SHA' '$REPO_URL' '$DEPLOY_BRANCH'" <<'REMOTE'
 set -euo pipefail
-cd "$1"
-NEW_TAG="$2"
-chmod 600 .env
-PREV_TAG="$(cat .last_good_tag 2>/dev/null || echo latest)"
+APP_DIR="$1"; SHA="$2"; REPO_URL="$3"; DEPLOY_BRANCH="$4"
 
-deploy() {
-  IMAGE_TAG="$1" docker compose pull
+export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-/etc/ducktivity/age-key.txt}"
+EDGE_NET="${EDGE_NET:-ducktivity_edge}"                    # shared ingress network (edge stack owns it)
+READYZ_HOST="${READYZ_HOST:-identity-backend}"           # app's compose network alias
+READYZ_PORT="${READYZ_PORT:-8000}"
+IMAGE="${IMAGE:-ghcr.io/ducktivity/identity-backend}"
+# Pinned from the SHA arg, not the tree, so the git sync can't deploy the wrong build. Matches CI's `type=sha,prefix=sha-`.
+IMAGE_TAG="sha-${SHA:0:7}"
+
+# IMAGE_TAG overrides the compose default via env — no file edits to pin a tag.
+deploy_tag() {
+  IMAGE_TAG="$1" docker compose pull --quiet
   IMAGE_TAG="$1" docker compose up -d --remove-orphans
 }
 
+# Release gate: probe /readyz (also confirms NeonDB). Image is distroless (no curl), so probe from a throwaway curl container on the edge network.
 ready() {
   for _ in $(seq 1 10); do
-    if docker run --rm --network ducktivity_edge curlimages/curl:latest \
-        -fsS http://identity-backend:8000/readyz >/dev/null 2>&1; then return 0; fi
+    if docker run --rm --network "$EDGE_NET" curlimages/curl:latest \
+        -fsS "http://$READYZ_HOST:$READYZ_PORT/readyz" >/dev/null 2>&1; then
+      return 0
+    fi
     sleep 3
   done
   return 1
 }
 
-echo "deploying $NEW_TAG (previous good: $PREV_TAG)"
-deploy "$NEW_TAG"
-docker image prune -f
+# 1. Converge the box's clone onto the exact commit — idempotent. First run: mkdir + clone (--no-checkout, nothing materialized before sparse-checkout narrows to deploy/). Later runs: skip clone, just fetch + re-point. --force only touches tracked files, so box-local .env/.last_good_tag survive.
+mkdir -p "$APP_DIR"
+cd "$APP_DIR"
+if [ ! -d .git ]; then
+  git clone --quiet --no-checkout "$REPO_URL" .
+fi
+git fetch --quiet origin "$DEPLOY_BRANCH"
+git sparse-checkout init --cone
+git sparse-checkout set deploy
+git checkout --quiet --force "$SHA"
+
+cd "$APP_DIR/deploy"   # docker-compose.yml, .env.sops, and the decrypted .env live here
+
+# 2. Decrypt secrets into the .env compose auto-loads. Atomic swap so a failed decrypt leaves the last good .env intact.
+umask 077
+sops --decrypt --input-type dotenv --output-type dotenv .env.sops > .env.tmp
+chmod 600 .env.tmp
+mv .env.tmp .env
+
+# 3. Record the live tag (rollback target), then converge.
+GOOD="$(cat .last_good_tag 2>/dev/null || true)"
+
+echo "deploying: ${GOOD:-none} -> $IMAGE_TAG ($IMAGE:$IMAGE_TAG, sha $SHA)"
+deploy_tag "$IMAGE_TAG"
+docker image prune -f >/dev/null 2>&1 || true
 
 if ready; then
-  echo "$NEW_TAG" > .last_good_tag
-  echo "deploy ok: $NEW_TAG is live"
+  echo "$IMAGE_TAG" > .last_good_tag
+  echo "ok: $IMAGE_TAG is live"
 else
-  echo "readyz failed; rolling back to $PREV_TAG" >&2
-  deploy "$PREV_TAG"
+  if [ -n "$GOOD" ] && [ "$GOOD" != "$IMAGE_TAG" ]; then
+    echo "readyz failed for $IMAGE_TAG; rolling back to $GOOD" >&2
+    deploy_tag "$GOOD"
+    ready || echo "WARNING: rollback to $GOOD also failed readyz — investigate" >&2
+  else
+    echo "readyz failed for $IMAGE_TAG and no known-good build to roll back to" >&2
+  fi
   exit 1
 fi
 REMOTE

@@ -73,27 +73,30 @@ build output in `backend/tmp/`) and serves on `http://localhost:8000`.
 
 ## Deploying it
 
-Deploy is **two phases**: CI builds and migrates automatically on merge; going live is
-a deliberate manual step. Expand-only migrations keep the old container working against
-the new schema, so there's no rush between the two.
+Deploy is **push-based**: merging to `main` builds, migrates, and goes live in one
+automatic run. Expand-only migrations keep the old container working against the new
+schema during the brief cutover. Full runbook: [deploy/README.md](deploy/README.md).
 
-**Phase 1 — push to `main` (automatic).** When anything under `backend/` changes,
+**On push to `main`** touching `backend/` or `deploy/`,
 [Backend CD](.github/workflows/cd-backend.yml) re-verifies the commit, runs the
-expand-only goose migration straight at Neon, and — only if that succeeds — builds the
-image and pushes it to GHCR tagged `latest` and `sha-<gitsha>`. **CI stops here.** It
-holds no SSH access to the box and never flips the live service.
+expand-only goose migration straight at Neon, builds and pushes the image to GHCR
+(`latest` + `sha-<gitsha>`), then SSHes to the box over Cloudflare Access (short-lived
+cert from a service token — no standing key, no open port 22) and runs
+[`deploy/deploy.sh`](deploy/deploy.sh) `<sha>`. That checks out the commit, sops-decrypts
+`.env`, brings the stack up at the matching `sha-<gitsha>`, gates on `/readyz`, and
+**auto-rolls-back** on the box if it never reports ready. A failed deploy turns the
+Actions run red — that's the only alert.
 
-**Phase 2 — go live (manual).** From your machine, reconcile the box to a specific tag:
+**Secrets** are committed, SOPS-encrypted, as [deploy/.env.sops](deploy/.env.sops) —
+values encrypted, keys readable. The box decrypts on the fly with its age key; the
+plaintext `.env.prod` never leaves your disk. Edit them with
+`./deploy/secrets.sh edit`, then commit `.env.sops` and push.
+
+**Roll back** (image revert only) to any past commit from your machine:
 
 ```bash
-./deploy/remote-deploy.sh sha-1a2b3c4      # or: latest
+./deploy/remote-deploy.sh <full-git-sha>
 ```
-
-It copies `docker-compose.yml` and your local `.env.prod` (landed on the box as `.env`)
-over Cloudflare Access SSH, then on the box pulls the tag, runs `compose up`, gates on
-`/readyz`, and **auto-rolls-back** to the last good tag if the new one never reports
-ready. No secrets ever touch git or GitHub — they live only in `identity/.env.prod` on
-your disk.
 
 **Publishing the API client (manual, for now).** The `@ducktivity/identity-client` npm
 package is **not** shipped by CI — [API Client CD](.github/workflows/cd-api-client.yml)
@@ -111,18 +114,20 @@ npm publish --access public    # needs "npm login" for the @ducktivity org
 
 Prereqs:
 
-- [ ] `cloudflared` installed.
-- [ ] Cloudflare Access service token sourced (`TUNNEL_SERVICE_TOKEN_ID` / `TUNNEL_SERVICE_TOKEN_SECRET`).
-- [ ] `identity/.env.prod` filled in (copy from [.env.example](.env.example)).
+- [ ] `sops` + `age` installed, and box secrets encrypted: copy [deploy/.env.example](deploy/.env.example) to `deploy/.env.prod`, then `./deploy/secrets.sh encrypt` and commit `deploy/.env.sops`.
+- [ ] For manual rollback (`remote-deploy.sh`): `cloudflared` installed and an Access service token sourced (`TUNNEL_SERVICE_TOKEN_ID` / `TUNNEL_SERVICE_TOKEN_SECRET`).
 - [ ] The shared [edge stack](../edge/README.md) is up — it owns the `ducktivity_edge` network this app attaches to.
+
+See [deploy/README.md](deploy/README.md) for the full one-time box + key setup.
 
 ## Files
 
-| File                 | What                                                                 |
-| -------------------- | -------------------------------------------------------------------- |
-| `backend/`           | The Go service (`go tool air` to run).                               |
-| `docker-compose.yml` | The `app` service; attaches to the shared `ducktivity_edge` network. |
-| `.env.example`       | Box runtime env template. Copy to `.env.prod` and fill it in.        |
+| File                        | What                                                                       |
+| --------------------------- | -------------------------------------------------------------------------- |
+| `backend/`                  | The Go service (`go tool air` to run).                                     |
+| `deploy/`                   | The push-based SOPS deploy stack — see [deploy/README.md](deploy/README.md). |
+| `deploy/docker-compose.yml` | The `app` service; attaches to the shared `ducktivity_edge` network.       |
+| `deploy/.env.example`       | Box runtime env template. Copy to `deploy/.env.prod` and fill it in.       |
 
 Ingress (the shared `cloudflared`) and log shipping (the shared `vector`) both live in
 the [edge stack](../edge/README.md) — this app just attaches to `ducktivity_edge` as
